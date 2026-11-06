@@ -995,6 +995,9 @@
       <canvas id="fx"></canvas>
     </div>
 
+    <!-- Background music: Heeriye (flute cover) -->
+    <audio id="bgm" src="audio/heeriye.mp3" loop preload="auto"></audio>
+
     <!-- INTRO / COVER -->
     <section id="intro">
       <p class="eyebrow">The Wedding Celebration</p>
@@ -1370,111 +1373,50 @@
         ? location.href.split("#")[0]
         : SITE_URL;
 
-      // ---- Background music (generated in-browser with Web Audio, no file needed) ----
+      // ---- Background music: audio/heeriye.mp3 (loops, fades in/out) ----
       const sound = $("#sound");
-      let ctx,
-        master,
-        soundOn = true,
-        timer,
-        step = 0;
-      function startMusic() {
-        if (ctx) return ctx.resume();
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        master = ctx.createGain();
-        master.gain.value = 0;
-        // simple echo "room"
-        const delay = ctx.createDelay(1);
-        delay.delayTime.value = 0.42;
-        const fb = ctx.createGain();
-        fb.gain.value = 0.38;
-        const lp = ctx.createBiquadFilter();
-        lp.type = "lowpass";
-        lp.frequency.value = 2400;
-        delay.connect(fb);
-        fb.connect(lp);
-        lp.connect(delay);
-        master.connect(ctx.destination);
-        master.connect(delay);
-        lp.connect(ctx.destination);
-        master.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 3);
+      const bgm = $("#bgm");
+      const MUSIC_VOLUME = 0.6; // 0 to 1
+      let soundOn = true,
+        fadeTimer;
 
-        // tanpura-like drone: C3 + G3 + C4, slowly breathing
-        [
-          [130.81, 0.09],
-          [196, 0.06],
-          [261.63, 0.04],
-        ].forEach(([f, v]) => {
-          const o = ctx.createOscillator(),
-            g = ctx.createGain(),
-            l = ctx.createOscillator(),
-            lg = ctx.createGain();
-          o.type = "triangle";
-          o.frequency.value = f;
-          g.gain.value = v;
-          l.frequency.value = 0.12 + Math.random() * 0.1;
-          lg.gain.value = v * 0.5;
-          l.connect(lg);
-          lg.connect(g.gain);
-          o.connect(g);
-          g.connect(master);
-          o.start();
-          l.start();
-        });
-
-        // pluck melody on Bhupali scale (C D E G A), gentle random walk
-        const scale = [
-          261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.25, 784,
-        ];
-        let idx = 4;
-        const pluck = (f, t, vel) => {
-          [
-            [1, 1],
-            [2, 0.25],
-            [3, 0.08],
-          ].forEach(([m, a]) => {
-            const o = ctx.createOscillator(),
-              g = ctx.createGain();
-            o.type = "sine";
-            o.frequency.value = f * m;
-            g.gain.setValueAtTime(0, t);
-            g.gain.linearRampToValueAtTime(vel * a, t + 0.015);
-            g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
-            o.connect(g);
-            g.connect(master);
-            o.start(t);
-            o.stop(t + 2.3);
-          });
-        };
-        const pattern = [1, 0, 1, 1, 0, 1, 0, 1]; // rest pattern for a flowing feel
-        let next = ctx.currentTime + 0.5;
-        timer = setInterval(() => {
-          while (next < ctx.currentTime + 0.6) {
-            if (pattern[step % pattern.length]) {
-              idx = Math.max(
-                0,
-                Math.min(
-                  scale.length - 1,
-                  idx + [-2, -1, -1, 1, 1, 2][(Math.random() * 6) | 0]
-                )
-              );
-              pluck(scale[idx], next, 0.16);
-              if (step % 8 === 0) pluck(scale[0] / 2, next, 0.12); // low root on the bar
-            }
-            next += 0.62;
-            step++;
+      function fadeTo(target, ms, done) {
+        clearInterval(fadeTimer);
+        const from = bgm.volume,
+          t0 = performance.now();
+        fadeTimer = setInterval(() => {
+          const k = Math.min(1, (performance.now() - t0) / ms);
+          bgm.volume = Math.max(0, Math.min(1, from + (target - from) * k));
+          if (k >= 1) {
+            clearInterval(fadeTimer);
+            done && done();
           }
-        }, 150);
+        }, 50);
+      }
+      function startMusic() {
+        bgm.volume = 0;
+        const p = bgm.play();
+        if (p && p.catch)
+          p.catch(() => {
+            // autoplay blocked: let the user start it with the button
+            soundOn = false;
+            sound.textContent = "♪ Sound Off";
+          });
+        fadeTo(MUSIC_VOLUME, 2500);
       }
       function setSound(on) {
         soundOn = on;
         sound.textContent = on ? "♪ Sound On" : "♪ Sound Off";
-        if (!ctx) return on && startMusic();
-        master.gain.cancelScheduledValues(ctx.currentTime);
-        master.gain.setTargetAtTime(on ? 0.55 : 0, ctx.currentTime, 0.4);
-        on ? ctx.resume() : setTimeout(() => !soundOn && ctx.suspend(), 1200);
+        if (on) {
+          bgm.play().catch(() => {});
+          fadeTo(MUSIC_VOLUME, 800);
+        } else {
+          fadeTo(0, 600, () => bgm.pause());
+        }
       }
       document.addEventListener("visibilitychange", () => {
-        if (ctx) document.hidden || !soundOn ? ctx.suspend() : ctx.resume();
+        if (document.hidden) bgm.pause();
+        else if (soundOn && !$("#site").hidden) bgm.play().catch(() => {});
       });
 
       // ===== Background FX: drifting petals + twinkling gold sparkles =====
@@ -1710,7 +1652,7 @@
       };
 
       // ---- Rotation helper (only runs with ?debug in the URL) ----
-      const BUILD = "v4";
+      const BUILD = "v5";
       console.log("Wedding invitation build", BUILD);
       if (location.search.includes("debug")) {
         const order = [null, "90", "180", "-90"];
